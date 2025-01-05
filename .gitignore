@@ -1,0 +1,38 @@
+# Системные файлы
+.DS_Store
+Thumbs.db
+
+# Папка настроек PyCharm
+.idea/
+
+# Виртуальные окружения
+venv/
+env/
+.venv/
+
+# Python файлы
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Логи и временные файлы
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Настройки Jupyter
+.ipynb_checkpoints/
+
+# Зависимости
+*.egg-info/
+dist/
+build/
+
+# Конфигурационные файлы, содержащие секреты
+*.env
+.env.*
+
+# Исключение файлов систем контроля версий
+.git/
