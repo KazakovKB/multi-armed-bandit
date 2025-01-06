@@ -8,14 +8,22 @@ from IPython.display import display
 
 class normal_inverse_gamma:
 
-    def __init__(self, arms_info: dict, rounds: int = 20000, baseline_mu: float = 0.035, discount_factor: float = 0.8):
+    def __init__(self, arms_info: dict, rounds: int = 20000, baseline_mu: float = 0.035,
+                 baseline_sigma2: float = 0.01, baseline_lambda: int = 1, baseline_alpha: int = 2,
+                 baseline_beta: int = 2, discount_factor: float = 0.8) -> None:
         self.discount_factor = discount_factor
         self.arms_info = arms_info
         self.baseline_mu = baseline_mu
+        self.baseline_sigma2 = baseline_sigma2
+        self.baseline_lambda = baseline_lambda
+        self.baseline_alpha = baseline_alpha
+        self.baseline_beta = baseline_beta
         self.rounds = rounds
         self.result = pd.DataFrame()
+        self.traffic_distribution = list()
+        self.bid_rates = list()
 
-    def linear_to_log_params(self, mu_x, var_x):
+    def linear_to_log_params(self, mu_x, var_x) -> tuple[float, float]:
         """
         Переводит (среднее, дисперсию) на линейной шкале (mu_x, var_x)
         в (mu_theta, sigma_theta^2) на лог-шкале логнормального распределения.
@@ -28,7 +36,7 @@ class normal_inverse_gamma:
 
         return mu_theta, sigma_theta2
 
-    def update_nig_oneobs(self, y_new, mu_0, lambda_0, alpha_0, beta_0):
+    def update_nig_oneobs(self, y_new, mu_0, lambda_0, alpha_0, beta_0) -> tuple[float, int, int, int]:
         """
         Обновляет параметры NIG, учитывая ОДНО наблюдение y_new.
         Параметры:
@@ -51,7 +59,7 @@ class normal_inverse_gamma:
 
         return mu_n, lambda_n, alpha_n, beta_n
 
-    def discounted_update_nig(self, y_new, mu_0, lambda_0, alpha_0, beta_0):
+    def discounted_update_nig(self, y_new, mu_0, lambda_0, alpha_0, beta_0) -> tuple[float, int, int, int]:
         """
         - Сначала "старим" (дисконтируем) текущие параметры,
           т. е. делаем их ближе к исходному (слабее).
@@ -59,9 +67,9 @@ class normal_inverse_gamma:
         """
 
         # 1. "Старим" параметры
-        lambda_0 = 1.0 + self.discount_factor * (lambda_0 - 1.0)
-        alpha_0  = 2.0 + self.discount_factor * (alpha_0  - 2.0)
-        beta_0   = 2.0 + self.discount_factor * (beta_0   - 2.0)
+        lambda_0 = self.baseline_lambda + self.discount_factor * (lambda_0 - self.baseline_lambda)
+        alpha_0  = self.baseline_alpha + self.discount_factor * (alpha_0  - self.baseline_alpha)
+        beta_0   = self.baseline_beta + self.discount_factor * (beta_0   - self.baseline_beta)
 
         mu_0 = self.baseline_mu + self.discount_factor * (mu_0 - self.baseline_mu)
 
@@ -86,14 +94,14 @@ class normal_inverse_gamma:
 
         return mu_sample, sigma2_sample
 
-    def simulation(self):
+    def fit(self) -> None:
 
         # Переводим (среднее, дисперсию) на линейной шкале (mu_x, var_x) в (mu_theta, sigma_theta^2) на лог-шкале
         true_mu_log = {}
         true_sigma2_log = {}
         for arm in self.arms_info.keys():
             mu_x = self.arms_info[arm]
-            var_x = 0.01
+            var_x = self.baseline_sigma2
 
             mu_theta, sigma_theta2 = self.linear_to_log_params(mu_x, var_x)
             true_mu_log[arm] = mu_theta
@@ -103,16 +111,13 @@ class normal_inverse_gamma:
         nig_params = {}
         for arm in self.arms_info.keys():
             nig_params[arm] = {
-                'mu': np.log(0.035),   # mu_0
-                'lambda': 1.0,         # lambda_0 (чем меньше, тем "шире" доверие)
-                'alpha': 2.0,          # alpha_0
-                'beta': 2.0,           # beta_0
+                'mu': np.log(self.baseline_mu),  # mu_0
+                'lambda': self.baseline_lambda,  # lambda_0 (чем меньше, тем "шире" доверие)
+                'alpha': self.baseline_alpha,    # alpha_0
+                'beta': self.baseline_beta,      # beta_0
             }
 
         # Цикл Thompson Sampling с NIG + логнорм
-        traffic_distribution = []
-        bid_rates = []
-
         for t in tqdm(range(self.rounds)):
             # Шаг 1: Для каждой кампании сэмплируем (mu, sigma2) из NIG
             #        Затем получаем sampled_cpm = exp(mu)
@@ -148,19 +153,20 @@ class normal_inverse_gamma:
             nig_params[chosen_arm]['beta'] = beta_new
 
             # Сохраняем результат для статистики
-            traffic_distribution.append(chosen_arm)
-            bid_rates.append(sampled_values[chosen_arm])
+            self.traffic_distribution.append(chosen_arm)
+            self.bid_rates.append(sampled_values[chosen_arm])
 
-        # Анализ результатов
+        # Результаты
         self.result = pd.DataFrame({
-            'arm': traffic_distribution,
-            'value': bid_rates
+            'arm': self.traffic_distribution,
+            'value': self.bid_rates
         })
 
         self.result = self.result.groupby('arm').agg(
-            impressions=('value', 'count'),
+            traffic=('value', 'count'),
             cpm=('value', 'mean')
         ).reset_index()
 
-        print("Итоговая статистика по распределению трафика и ставкам:")
-        display(self.result)
+        self.result['percentage'] = np.round(self.result.traffic / self.result.traffic.sum() * 100, 2)
+
+        self.result.sort_values('percentage', ascending=False, inplace=True)

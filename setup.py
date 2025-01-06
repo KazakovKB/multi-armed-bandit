@@ -24,6 +24,7 @@ setup(
         'tqdm',
         'ipywidgets',
         'ipython',
+        'seaborn',
     ],
     extras_require={
         'notebooks': ['jupyter', 'ipython'],
